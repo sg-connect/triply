@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Triply — Your Travel Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,300,0,0" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="header">
+    <a class="header-brand" href="/">
+        <span class="brand-icon">✈️</span>
+        <span class="brand-name">Triply</span>
+    </a>
+    <nav class="header-nav">
+        <button class="nav-link active" onclick="showView('dashboard')">
+            <span class="material-symbols-rounded">dashboard</span> Dashboard
+        </button>
+        <button class="nav-link" onclick="showView('trips')">
+            <span class="material-symbols-rounded">luggage</span> Trips
+        </button>
+    </nav>
+    <div class="header-right">
+        <div class="ollama-status" id="ollamaStatus">
+            <span class="ollama-dot" id="ollamaDot"></span>
+            <span id="ollamaLabel">AI offline</span>
+        </div>
+        <button class="btn btn-primary" onclick="openNewTripModal()">
+            <span class="material-symbols-rounded">add</span> New Trip
+        </button>
+    </div>
+</header>
+
+<main class="main">
+
+    <!-- ── Dashboard View ── -->
+    <div id="view-dashboard">
+        <div class="page-header">
+            <div>
+                <div class="page-title">Dashboard</div>
+                <div class="page-subtitle" id="dashGreeting">Loading...</div>
+            </div>
+        </div>
+
+        <div class="stats-grid" id="statsGrid">
+            <div class="stat-card">
+                <div class="stat-label"><span class="material-symbols-rounded">luggage</span> Total Trips</div>
+                <div class="stat-value" id="statTotal">—</div>
+                <div class="stat-sub" id="statTotalSub"></div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label"><span class="material-symbols-rounded">flight_takeoff</span> Upcoming</div>
+                <div class="stat-value" id="statPlanned">—</div>
+                <div class="stat-sub">trips planned</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label"><span class="material-symbols-rounded">payments</span> Total Spent</div>
+                <div class="stat-value" id="statSpent">—</div>
+                <div class="stat-sub" id="statBudgetSub"></div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label"><span class="material-symbols-rounded">check_circle</span> Completed</div>
+                <div class="stat-value" id="statCompleted">—</div>
+                <div class="stat-sub">trips done</div>
+            </div>
+        </div>
+
+        <div id="upcomingBanner"></div>
+
+        <div class="section-header">
+            <div class="section-title">Recent Trips</div>
+            <button class="btn btn-ghost" onclick="showView('trips')">
+                View all <span class="material-symbols-rounded">chevron_right</span>
+            </button>
+        </div>
+
+        <div class="trips-grid" id="recentTrips">
+            <div class="loading"><div class="spinner"></div> Loading trips...</div>
+        </div>
+    </div>
+
+    <!-- ── Trips View ── -->
+    <div id="view-trips" style="display:none">
+        <div class="page-header">
+            <div>
+                <div class="page-title">All Trips</div>
+                <div class="page-subtitle">Manage your travel plans</div>
+            </div>
+            <button class="btn btn-primary" onclick="openNewTripModal()">
+                <span class="material-symbols-rounded">add</span> New Trip
+            </button>
+        </div>
+
+        <div class="filter-tabs" id="filterTabs">
+            <button class="filter-tab active" onclick="setFilter('all')">All</button>
+            <button class="filter-tab" onclick="setFilter('planned')">Planned</button>
+            <button class="filter-tab" onclick="setFilter('ongoing')">Ongoing</button>
+            <button class="filter-tab" onclick="setFilter('completed')">Completed</button>
+        </div>
+
+        <div class="trips-grid" id="allTrips">
+            <div class="loading"><div class="spinner"></div> Loading trips...</div>
+        </div>
+    </div>
+
+</main>
+
+<!-- ── New Trip Modal ── -->
+<div class="modal-overlay" id="newTripModal">
+    <div class="modal">
+        <div class="modal-header">
+            <div class="modal-title">New Trip</div>
+            <button class="modal-close" onclick="closeNewTripModal()">
+                <span class="material-symbols-rounded">close</span>
+            </button>
+        </div>
+        <div class="modal-body">
+            <div class="form-grid">
+                <div class="form-group full">
+                    <label class="form-label">Trip Name</label>
+                    <input class="form-input" id="tripName" placeholder="e.g. Summer in Barcelona" />
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Destination City</label>
+                    <input class="form-input" id="tripDestination" placeholder="e.g. Barcelona" />
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Country</label>
+                    <input class="form-input" id="tripCountry" placeholder="e.g. Spain" />
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Start Date</label>
+                    <input class="form-input" id="tripStart" type="date" />
+                </div>
+                <div class="form-group">
+                    <label class="form-label">End Date</label>
+                    <input class="form-input" id="tripEnd" type="date" />
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Total Budget</label>
+                    <input class="form-input" id="tripBudget" type="number" placeholder="0" />
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Currency</label>
+                    <select class="form-select" id="tripCurrency">
+                        <option value="EUR">EUR €</option>
+                        <option value="USD">USD $</option>
+                        <option value="GBP">GBP £</option>
+                        <option value="SEK">SEK kr</option>
+                        <option value="JPY">JPY ¥</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Emoji</label>
+                    <input class="form-input" id="tripEmoji" placeholder="✈️" maxlength="4" />
+                </div>
+                <div class="form-group full">
+                    <label class="form-label">Notes</label>
+                    <textarea class="form-textarea" id="tripNotes" placeholder="What are you excited about?"></textarea>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="closeNewTripModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="createTrip()">
+                <span class="material-symbols-rounded">add</span> Create Trip
+            </button>
+        </div>
+    </div>
+</div>
+
+<div class="toast-container" id="toastContainer"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
