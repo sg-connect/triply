@@ -1,293 +1,122 @@
-let allTrips = [];
-let currentFilter = 'all';
-let currentView = 'dashboard';
+let settings = {};
 
-// ── Init ─────────────────────────────────────────────────
 async function init() {
-    await seedIfEmpty();
-    await loadOllamaStatus();
-    await loadDashboard();
-    setGreeting();
+    loadAiStatus();
+    const [stats, trips] = await Promise.all([
+        fetch('/api/stats').then(r => r.json()).catch(() => ({})),
+        fetch('/api/trips').then(r => r.json()).catch(() => []),
+    ]);
+    settings = await fetch('/api/settings').then(r => r.json()).catch(() => ({}));
+    renderStats(stats);
+    renderUpcoming(stats.upcomingTrip);
+    renderTrips(trips.slice(0, 6));
+    document.getElementById('greeting').textContent = greeting();
 }
 
-async function seedIfEmpty() {
+function greeting() {
+    const h = new Date().getHours();
+    if (h < 12) return 'Good morning ✈️';
+    if (h < 17) return 'Good afternoon ✈️';
+    return 'Good evening ✈️';
+}
+
+async function loadAiStatus() {
     try {
-        await fetch('/api/seed', { method: 'POST' });
-    } catch {}
-}
-
-// ── Views ─────────────────────────────────────────────────
-function showView(view) {
-    document.querySelectorAll('[id^="view-"]').forEach(el => el.style.display = 'none');
-    document.getElementById(`view-${view}`).style.display = '';
-    document.querySelectorAll('.nav-link').forEach(el => el.classList.remove('active'));
-    const idx = view === 'dashboard' ? 0 : 1;
-    document.querySelectorAll('.nav-link')[idx]?.classList.add('active');
-    currentView = view;
-
-    if (view === 'trips') loadAllTrips();
-}
-
-// ── Greeting ──────────────────────────────────────────────
-function setGreeting() {
-    const hour = new Date().getHours();
-    const msg = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
-    const el = document.getElementById('dashGreeting');
-    if (el) el.textContent = `${msg} — here's your travel overview`;
-}
-
-// ── Ollama ────────────────────────────────────────────────
-async function loadOllamaStatus() {
-    try {
-        const data = await fetch('/api/ollama/status').then(r => r.json());
-        const dot = document.getElementById('ollamaDot');
-        const label = document.getElementById('ollamaLabel');
-        if (data.available) {
-            dot.className = 'ollama-dot online';
-            label.textContent = `AI — ${data.travelModels[0] || data.models[0] || 'ready'}`;
+        const d = await fetch('/api/ollama/status').then(r => r.json());
+        const dot = document.getElementById('aiDot');
+        const label = document.getElementById('aiLabel');
+        if (d.available) {
+            dot.className = 'ai-dot on';
+            const model = (d.travelModels[0] || d.models[0] || '').split(':')[0];
+            label.textContent = 'AI: ' + (model || 'ready');
         } else {
-            dot.className = 'ollama-dot offline';
+            dot.className = 'ai-dot off';
             label.textContent = 'AI offline';
         }
-    } catch {}
-}
-
-// ── Dashboard ─────────────────────────────────────────────
-async function loadDashboard() {
-    try {
-        const [stats, trips] = await Promise.all([
-            fetch('/api/stats').then(r => r.json()),
-            fetch('/api/trips').then(r => r.json()),
-        ]);
-        allTrips = trips;
-        renderStats(stats);
-        renderUpcomingBanner(stats.upcomingTrip);
-        renderTripCards(trips.slice(0, 6), 'recentTrips');
-    } catch (err) {
-        console.error(err);
-        toast('Failed to load dashboard', 'error');
+    } catch {
+        document.getElementById('aiDot').className = 'ai-dot off';
+        document.getElementById('aiLabel').textContent = 'AI offline';
     }
 }
 
-function renderStats(stats) {
-    document.getElementById('statTotal').textContent = stats.totalTrips;
-    document.getElementById('statTotalSub').textContent =
-        stats.topDestinations.length ? `Top: ${stats.topDestinations.join(', ')}` : 'No trips yet';
-    document.getElementById('statPlanned').textContent = stats.plannedTrips;
-    document.getElementById('statSpent').textContent = `€${formatMoney(stats.totalSpent)}`;
-    document.getElementById('statBudgetSub').textContent =
-        stats.totalBudget > 0 ? `of €${formatMoney(stats.totalBudget)} budget` : 'no budget set';
-    document.getElementById('statCompleted').textContent = stats.completedTrips;
+function renderStats(s) {
+    const curr = settings.currency === 'USD' ? '$' : 'kr';
+    document.getElementById('statVac').textContent = s.vacationDaysLeft ?? '—';
+    document.getElementById('statVacSub').textContent = `of ${settings.vacationDaysTotal || 25} total`;
+    document.getElementById('statUpcoming').textContent = (s.plannedTrips || 0) + (s.scheduledTrips || 0);
+    document.getElementById('statSpent').textContent = s.totalSpent ? fmtMoney(s.totalSpent, curr) : '0';
+    document.getElementById('statSpentSub').textContent = s.topDestinations && s.topDestinations.length ? 'top: ' + s.topDestinations[0] : 'across all trips';
+    document.getElementById('statDone').textContent = s.completedTrips ?? '—';
 }
 
-function renderUpcomingBanner(trip) {
+function renderUpcoming(trip) {
     const el = document.getElementById('upcomingBanner');
     if (!trip) { el.innerHTML = ''; return; }
-
-    const days = Math.ceil((new Date(trip.startDate) - new Date()) / 86400000);
-    const dateStr = formatDateRange(trip.startDate, trip.endDate);
-
+    const days = trip.startDate ? Math.max(0, Math.ceil((new Date(trip.startDate) - new Date()) / 86400000)) : null;
     el.innerHTML = `
-        <div class="upcoming-banner" onclick="openTripDetail('${trip._id}')">
-            <div class="upcoming-emoji">${trip.coverEmoji}</div>
+        <div class="upcoming-banner">
+            <div class="upcoming-flag">${trip.flag || '✈️'}</div>
             <div class="upcoming-info">
-                <div class="upcoming-label">Next adventure</div>
-                <div class="upcoming-title">${trip.name}</div>
-                <div class="upcoming-meta">${trip.destination}, ${trip.country} · ${dateStr}</div>
+                <div class="upcoming-label">Next trip</div>
+                <div class="upcoming-name">${trip.name}</div>
+                <div class="upcoming-dates">${trip.destination}${trip.startDate ? ' • ' + fmt(trip.startDate) : ''}</div>
             </div>
-            <div>
-                <div class="upcoming-days">${days > 0 ? days : 'Today!'}</div>
-                <div class="upcoming-days-label">${days > 1 ? 'days to go' : days === 1 ? 'day to go' : ''}</div>
-            </div>
+            ${days !== null ? `<div style="text-align:right"><div class="upcoming-countdown">${days}</div><div class="upcoming-cdays">days to go</div></div>` : ''}
         </div>`;
 }
 
-// ── All Trips ─────────────────────────────────────────────
-async function loadAllTrips() {
-    try {
-        allTrips = await fetch('/api/trips').then(r => r.json());
-        applyFilter();
-    } catch {
-        toast('Failed to load trips', 'error');
-    }
-}
-
-function setFilter(filter) {
-    currentFilter = filter;
-    document.querySelectorAll('.filter-tab').forEach(el => el.classList.remove('active'));
-    event.target.classList.add('active');
-    applyFilter();
-}
-
-function applyFilter() {
-    const filtered = currentFilter === 'all'
-        ? allTrips
-        : allTrips.filter(t => t.status === currentFilter);
-    renderTripCards(filtered, 'allTrips');
-}
-
-// ── Trip Cards ────────────────────────────────────────────
-function renderTripCards(trips, containerId) {
-    const el = document.getElementById(containerId);
+function renderTrips(trips) {
+    const el = document.getElementById('recentTrips');
     if (!trips.length) {
-        el.innerHTML = `
-            <div class="empty-state">
-                <div class="empty-icon"><span class="material-symbols-rounded" style="font-size:56px">luggage</span></div>
-                <div class="empty-title">No trips yet</div>
-                <div class="empty-sub">Start planning your next adventure</div>
-                <button class="btn btn-primary" onclick="openNewTripModal()">
-                    <span class="material-symbols-rounded">add</span> New Trip
-                </button>
-            </div>`;
-        return;
-    }
-    el.innerHTML = trips.map(trip => tripCardHTML(trip)).join('');
-}
-
-function tripCardHTML(trip) {
-    const spent = trip.budget.expenses.filter(e => e.paid).reduce((s, e) => s + e.amount, 0);
-    const pct = trip.budget.totalBudget > 0 ? Math.min((spent / trip.budget.totalBudget) * 100, 100) : 0;
-    const over = spent > trip.budget.totalBudget && trip.budget.totalBudget > 0;
-    const dateStr = formatDateRange(trip.startDate, trip.endDate);
-    const placesVisited = trip.places.filter(p => p.status === 'visited').length;
-    const transportsCount = trip.transports.length;
-
-    return `
-        <div class="trip-card" onclick="openTripDetail('${trip._id}')">
-            <div class="trip-card-header">
-                <div class="trip-emoji">${trip.coverEmoji}</div>
-                <div class="trip-info">
-                    <div class="trip-name">${trip.name}</div>
-                    <div class="trip-destination">${trip.destination}, ${trip.country}</div>
-                    <span class="status-badge status-${trip.status}">${trip.status}</span>
-                </div>
-            </div>
-            <div class="trip-card-body">
-                <div class="trip-dates">
-                    <span class="material-symbols-rounded">calendar_month</span>
-                    ${dateStr}
-                </div>
-                ${trip.budget.totalBudget > 0 ? `
-                <div class="budget-bar-wrap">
-                    <div class="budget-bar-labels">
-                        <span>${trip.budget.currency} ${formatMoney(spent)} spent</span>
-                        <span>${trip.budget.currency} ${formatMoney(trip.budget.totalBudget)}</span>
-                    </div>
-                    <div class="budget-bar">
-                        <div class="budget-bar-fill ${over ? 'over' : ''}" style="width:${pct}%"></div>
-                    </div>
-                </div>` : ''}
-            </div>
-            <div class="trip-footer">
-                <div class="trip-footer-item">
-                    <span class="material-symbols-rounded">flight</span> ${transportsCount} transport${transportsCount !== 1 ? 's' : ''}
-                </div>
-                <div class="trip-footer-item">
-                    <span class="material-symbols-rounded">location_on</span> ${placesVisited}/${trip.places.length} places
-                </div>
-            </div>
+        el.innerHTML = `<div class="empty">
+            <div class="empty-icon">🗺️</div>
+            <h3>No trips yet</h3>
+            <p>Start planning your first adventure</p>
+            <a class="btn btn-primary" href="/plan.html" style="margin-top:16px">Plan a trip</a>
         </div>`;
-}
-
-// ── Trip Detail (placeholder) ─────────────────────────────
-function openTripDetail(id) {
-    const trip = allTrips.find(t => t._id === id || String(t._id) === String(id));
-    if (!trip) return;
-    toast(`Opening "${trip.name}" — detail view coming soon!`);
-}
-
-// ── New Trip Modal ────────────────────────────────────────
-function openNewTripModal() {
-    document.getElementById('newTripModal').classList.add('open');
-}
-
-function closeNewTripModal() {
-    document.getElementById('newTripModal').classList.remove('open');
-    clearNewTripForm();
-}
-
-function clearNewTripForm() {
-    ['tripName', 'tripDestination', 'tripCountry', 'tripStart', 'tripEnd', 'tripBudget', 'tripEmoji', 'tripNotes']
-        .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
-    document.getElementById('tripCurrency').value = 'EUR';
-}
-
-async function createTrip() {
-    const name = document.getElementById('tripName').value.trim();
-    const destination = document.getElementById('tripDestination').value.trim();
-
-    if (!name || !destination) {
-        toast('Name and destination are required', 'error');
         return;
     }
-
-    const body = {
-        name,
-        destination,
-        country: document.getElementById('tripCountry').value.trim(),
-        startDate: document.getElementById('tripStart').value,
-        endDate: document.getElementById('tripEnd').value,
-        coverEmoji: document.getElementById('tripEmoji').value.trim() || '✈️',
-        notes: document.getElementById('tripNotes').value.trim(),
-        status: 'planned',
-        budget: {
-            totalBudget: parseFloat(document.getElementById('tripBudget').value) || 0,
-            currency: document.getElementById('tripCurrency').value,
-            expenses: [],
-        },
-        transports: [],
-        places: [],
-    };
-
-    try {
-        const res = await fetch('/api/trips', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-        });
-        if (!res.ok) throw new Error('Failed');
-        const created = await res.json();
-        allTrips.unshift(created);
-        closeNewTripModal();
-        toast(`"${name}" created!`, 'success');
-        if (currentView === 'dashboard') loadDashboard();
-        else applyFilter();
-    } catch {
-        toast('Failed to create trip', 'error');
-    }
+    el.innerHTML = trips.map(t => tripCard(t)).join('');
 }
 
-// Close modal on overlay click
-document.getElementById('newTripModal').addEventListener('click', function(e) {
-    if (e.target === this) closeNewTripModal();
-});
-
-// ── Helpers ───────────────────────────────────────────────
-function formatMoney(n) {
-    if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
-    return n.toFixed(0);
+function tripCard(t) {
+    const curr = (t.budget && t.budget.currency === 'USD') ? '$' : 'kr';
+    const predicted = t.budget && t.budget.predictedBudget;
+    const real = t.budget && (t.budget.expenses || []).filter(e => !e.predicted).reduce((s, e) => s + e.amount, 0);
+    const pct = predicted && real ? Math.min(120, Math.round((real / predicted) * 100)) : 0;
+    const places = (t.places || []).slice(0, 3).map(p => p.name).join(', ');
+    const transport = (t.transports || []).map(tr => tr.type).filter((v, i, a) => a.indexOf(v) === i).join(', ');
+    return `<div class="trip-card" onclick="location.href='/trips.html?id=${t._id}'">
+        <div class="trip-card-top">
+            <div class="trip-flag">${t.flag || '✈️'}</div>
+            <div style="flex:1">
+                <div class="trip-name">${t.name}</div>
+                <div class="trip-dest">${t.destination}${t.country ? ', ' + t.country : ''}</div>
+                ${t.startDate ? `<div class="trip-dates">${fmt(t.startDate)}${t.endDate ? ' – ' + fmt(t.endDate) : ''}</div>` : ''}
+            </div>
+            <span class="badge badge-${t.status}">${t.status}</span>
+        </div>
+        ${predicted ? `<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-secondary);margin-bottom:4px">
+            <span>Budget: ${fmtMoney(predicted, curr)}</span>
+            ${real ? `<span style="color:${pct > 100 ? 'var(--danger)' : 'var(--green)'}">Spent: ${fmtMoney(real, curr)}</span>` : ''}
+        </div>
+        <div class="budget-track"><div class="budget-fill${pct > 100 ? ' over' : ''}" style="width:${pct}%"></div></div>` : ''}
+        <div class="trip-meta">
+            ${t.durationDays ? `<span><span class="material-symbols-rounded">schedule</span>${t.durationDays}d</span>` : ''}
+            ${transport ? `<span><span class="material-symbols-rounded">flight</span>${transport}</span>` : ''}
+            ${places ? `<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${places}</span>` : ''}
+        </div>
+    </div>`;
 }
 
-function formatDateRange(start, end) {
-    if (!start) return 'Dates TBD';
-    const s = new Date(start);
-    const e = end ? new Date(end) : null;
-    const opts = { day: 'numeric', month: 'short' };
-    if (!e) return s.toLocaleDateString('en-GB', opts);
-    if (s.getFullYear() !== e.getFullYear()) {
-        return `${s.toLocaleDateString('en-GB', { ...opts, year: 'numeric' })} – ${e.toLocaleDateString('en-GB', { ...opts, year: 'numeric' })}`;
-    }
-    return `${s.toLocaleDateString('en-GB', opts)} – ${e.toLocaleDateString('en-GB', opts)}`;
+function fmtMoney(n, curr) {
+    if (curr === '$') return '$' + n.toLocaleString();
+    return n.toLocaleString('sv-SE') + ' kr';
 }
 
-function toast(msg, type = '') {
-    const container = document.getElementById('toastContainer');
-    const el = document.createElement('div');
-    el.className = `toast ${type}`;
-    el.textContent = msg;
-    container.appendChild(el);
-    setTimeout(() => el.remove(), 3000);
+function fmt(d) {
+    if (!d) return '';
+    return new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-// ── Boot ──────────────────────────────────────────────────
 init();

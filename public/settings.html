@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Triply — Settings</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,300,1,0" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="header">
+    <a class="brand" href="/"><span class="brand-icon">✈️</span><span class="brand-name">Triply</span></a>
+    <nav class="nav">
+        <a class="nav-btn" href="/"><span class="material-symbols-rounded">dashboard</span>Dashboard</a>
+        <a class="nav-btn" href="/plan.html"><span class="material-symbols-rounded">explore</span>Plan a Trip</a>
+        <a class="nav-btn" href="/trips.html"><span class="material-symbols-rounded">luggage</span>My Trips</a>
+        <a class="nav-btn active" href="/settings.html"><span class="material-symbols-rounded">settings</span>Settings</a>
+    </nav>
+    <div class="header-right">
+        <button class="btn btn-primary" onclick="saveSettings()">
+            <span class="material-symbols-rounded">save</span>Save
+        </button>
+    </div>
+</header>
+<main class="settings-page">
+    <div class="page-header">
+        <div>
+            <div class="page-title">Settings</div>
+            <div class="page-sub">Personalize your travel preferences</div>
+        </div>
+    </div>
+
+    <!-- Vacation Days -->
+    <div class="settings-section">
+        <div class="settings-section-title">Vacation Days</div>
+        <div class="settings-section-sub">Track your annual vacation allowance to plan trips smarter</div>
+        <div class="settings-row">
+            <div>
+                <div class="settings-row-label">Total vacation days</div>
+                <div class="settings-row-sub">Your annual entitlement</div>
+            </div>
+            <div class="num-input-wrap">
+                <button class="num-btn" onclick="adjustNum('vacTotal', -1)">−</button>
+                <div class="num-val" id="vacTotal">25</div>
+                <button class="num-btn" onclick="adjustNum('vacTotal', +1)">+</button>
+            </div>
+        </div>
+        <div class="settings-row">
+            <div>
+                <div class="settings-row-label">Days used so far</div>
+                <div class="settings-row-sub">This year</div>
+            </div>
+            <div class="num-input-wrap">
+                <button class="num-btn" onclick="adjustNum('vacUsed', -1)">−</button>
+                <div class="num-val" id="vacUsed">0</div>
+                <button class="num-btn" onclick="adjustNum('vacUsed', +1)">+</button>
+            </div>
+        </div>
+        <div class="settings-row" style="border-bottom:none">
+            <div class="settings-row-label">Days remaining</div>
+            <div style="font-size:20px;font-weight:800;color:var(--green)" id="vacLeft">25</div>
+        </div>
+    </div>
+
+    <!-- Currency -->
+    <div class="settings-section">
+        <div class="settings-section-title">Currency</div>
+        <div class="settings-section-sub">Used for all budget calculations and display</div>
+        <div class="toggle-opts">
+            <div class="toggle-opt selected" id="curr-SEK" onclick="selectCurrency('SEK')">🇸🇪 SEK — Swedish Krona</div>
+            <div class="toggle-opt" id="curr-USD" onclick="selectCurrency('USD')">🇺🇸 USD — US Dollar</div>
+        </div>
+    </div>
+
+    <!-- Preferred Transport -->
+    <div class="settings-section">
+        <div class="settings-section-title">Preferred Transport</div>
+        <div class="settings-section-sub">Select all that apply — used for AI suggestions</div>
+        <div class="transport-chips">
+            <div class="transport-chip selected" data-transport="flight" onclick="toggleTransport(this)">✈️ Flight</div>
+            <div class="transport-chip" data-transport="train" onclick="toggleTransport(this)">🚂 Train</div>
+            <div class="transport-chip" data-transport="bus" onclick="toggleTransport(this)">🚌 Bus</div>
+            <div class="transport-chip" data-transport="car" onclick="toggleTransport(this)">🚗 Car</div>
+            <div class="transport-chip" data-transport="ferry" onclick="toggleTransport(this)">⛴️ Ferry</div>
+        </div>
+    </div>
+
+    <!-- Travel Style -->
+    <div class="settings-section">
+        <div class="settings-section-title">Default Travel Style</div>
+        <div class="settings-section-sub">Your default preference — can be changed per trip</div>
+        <div class="toggle-opts">
+            <div class="toggle-opt" data-style="adventure" onclick="selectStyle(this)">🧗 Adventure</div>
+            <div class="toggle-opt" data-style="relax" onclick="selectStyle(this)">🏖️ Relax</div>
+            <div class="toggle-opt" data-style="culture" onclick="selectStyle(this)">🏛️ Culture</div>
+            <div class="toggle-opt" data-style="nature" onclick="selectStyle(this)">🌿 Nature</div>
+            <div class="toggle-opt" data-style="nightlife" onclick="selectStyle(this)">🎉 Nightlife</div>
+            <div class="toggle-opt selected" data-style="mixed" onclick="selectStyle(this)">✨ Mixed</div>
+        </div>
+    </div>
+
+    <!-- Budget Range -->
+    <div class="settings-section">
+        <div class="settings-section-title">Default Budget Range</div>
+        <div class="settings-section-sub">Used as a starting point when planning trips</div>
+        <div class="settings-row">
+            <div class="settings-row-label">Minimum</div>
+            <div class="num-input-wrap">
+                <button class="num-btn" onclick="adjustBudget('min', -1000)">−</button>
+                <div style="font-size:16px;font-weight:700;color:var(--blue);min-width:60px;text-align:center" id="budgetMin">5 000</div>
+                <button class="num-btn" onclick="adjustBudget('min', +1000)">+</button>
+            </div>
+        </div>
+        <div class="settings-row" style="border-bottom:none">
+            <div class="settings-row-label">Maximum</div>
+            <div class="num-input-wrap">
+                <button class="num-btn" onclick="adjustBudget('max', -1000)">−</button>
+                <div style="font-size:16px;font-weight:700;color:var(--blue);min-width:60px;text-align:center" id="budgetMax">25 000</div>
+                <button class="num-btn" onclick="adjustBudget('max', +1000)">+</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Public Holidays -->
+    <div class="settings-section">
+        <div class="settings-section-title">Public Holidays</div>
+        <div class="settings-section-sub">Used to suggest smart trip windows. Swedish 2026 holidays are pre-loaded.</div>
+        <div class="holiday-settings-list" id="holidayList"></div>
+        <div class="add-holiday-row">
+            <input type="date" id="newHolidayDate">
+            <input type="text" id="newHolidayName" placeholder="Holiday name">
+            <button class="btn btn-secondary" onclick="addHoliday()">
+                <span class="material-symbols-rounded">add</span>Add
+            </button>
+        </div>
+    </div>
+
+    <!-- Data -->
+    <div class="settings-section">
+        <div class="settings-section-title">Data</div>
+        <div class="settings-section-sub">Manage your trip data</div>
+        <div class="settings-row" style="border-bottom:none">
+            <div>
+                <div class="settings-row-label">Wipe all data</div>
+                <div class="settings-row-sub">Delete all trips and reset settings to defaults</div>
+            </div>
+            <button class="btn btn-danger" onclick="wipeData()">
+                <span class="material-symbols-rounded">delete_forever</span>Wipe All
+            </button>
+        </div>
+    </div>
+</main>
+<div class="toasts" id="toasts"></div>
+<script src="settings.js"></script>
+</body>
+</html>

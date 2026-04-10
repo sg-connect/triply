@@ -2,8 +2,7 @@ import express from 'express';
 import path from 'path';
 import * as db from './services/db';
 import * as ollama from './services/ollama';
-import { getMockTrips } from './mock-data';
-import { Trip } from './models';
+import { Trip, PlanRequest } from './models';
 
 const app = express();
 const PORT = 3400;
@@ -11,26 +10,14 @@ const PORT = 3400;
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
-// ── Stats ────────────────────────────────────────────────
 app.get('/api/stats', async (_req, res) => {
-    try {
-        const stats = await db.getTripStats();
-        res.json(stats);
-    } catch (err) {
-        console.error('[stats]', err);
-        res.status(500).json({ error: 'Failed to load stats' });
-    }
+    try { res.json(await db.getTripStats()); }
+    catch (err) { console.error('[stats]', err); res.status(500).json({ error: 'Failed to load stats' }); }
 });
 
-// ── Trips ────────────────────────────────────────────────
 app.get('/api/trips', async (_req, res) => {
-    try {
-        const trips = await db.getTrips();
-        res.json(trips);
-    } catch (err) {
-        console.error('[trips]', err);
-        res.status(500).json({ error: 'Failed to load trips' });
-    }
+    try { res.json(await db.getTrips()); }
+    catch (err) { console.error('[trips]', err); res.status(500).json({ error: 'Failed to load trips' }); }
 });
 
 app.get('/api/trips/:id', async (req, res) => {
@@ -38,112 +25,106 @@ app.get('/api/trips/:id', async (req, res) => {
         const trip = await db.getTripById(req.params.id);
         if (!trip) return res.status(404).json({ error: 'Trip not found' });
         res.json(trip);
-    } catch (err) {
-        console.error('[trip]', err);
-        res.status(500).json({ error: 'Failed to load trip' });
-    }
+    } catch (err) { console.error('[trip]', err); res.status(500).json({ error: 'Failed to load trip' }); }
 });
 
 app.post('/api/trips', async (req, res) => {
     try {
         const body = req.body as Partial<Trip>;
-        if (!body.name || !body.destination) {
-            return res.status(400).json({ error: 'name and destination are required' });
-        }
+        if (!body.name || !body.destination) return res.status(400).json({ error: 'name and destination required' });
+        const settings = await db.getSettings();
         const trip: Omit<Trip, '_id'> = {
             name: body.name,
             destination: body.destination,
             country: body.country || '',
+            countryCode: body.countryCode || '',
+            flag: body.flag || '✈️',
             startDate: body.startDate || '',
             endDate: body.endDate || '',
+            durationDays: body.durationDays || 0,
             status: body.status || 'planned',
-            coverEmoji: body.coverEmoji || '✈️',
+            travelStyle: body.travelStyle || settings.travelStyle,
             notes: body.notes || '',
-            budget: body.budget || { totalBudget: 0, currency: 'EUR', expenses: [] },
+            budget: body.budget || { totalBudget: 0, predictedBudget: 0, currency: settings.currency, expenses: [] },
             transports: body.transports || [],
             places: body.places || [],
-            createdAt: new Date(),
-            updatedAt: new Date(),
+            aiPlan: body.aiPlan,
         };
         const created = await db.createTrip(trip);
         res.status(201).json(created);
-    } catch (err) {
-        console.error('[create trip]', err);
-        res.status(500).json({ error: 'Failed to create trip' });
-    }
+    } catch (err) { console.error('[create-trip]', err); res.status(500).json({ error: 'Failed to create trip' }); }
 });
 
 app.put('/api/trips/:id', async (req, res) => {
     try {
-        const ok = await db.updateTrip(req.params.id, req.body);
-        if (!ok) return res.status(404).json({ error: 'Trip not found' });
-        res.json({ success: true });
-    } catch (err) {
-        console.error('[update trip]', err);
-        res.status(500).json({ error: 'Failed to update trip' });
-    }
+        const trip = await db.updateTrip(req.params.id, req.body);
+        if (!trip) return res.status(404).json({ error: 'Trip not found' });
+        res.json(trip);
+    } catch (err) { console.error('[update-trip]', err); res.status(500).json({ error: 'Failed to update trip' }); }
 });
 
 app.delete('/api/trips/:id', async (req, res) => {
     try {
         const ok = await db.deleteTrip(req.params.id);
         if (!ok) return res.status(404).json({ error: 'Trip not found' });
-        res.json({ success: true });
-    } catch (err) {
-        console.error('[delete trip]', err);
-        res.status(500).json({ error: 'Failed to delete trip' });
-    }
+        res.json({ ok: true });
+    } catch (err) { console.error('[delete-trip]', err); res.status(500).json({ error: 'Failed to delete trip' }); }
 });
 
-// ── AI Analysis ──────────────────────────────────────────
 app.post('/api/trips/:id/analyze', async (req, res) => {
     try {
         const trip = await db.getTripById(req.params.id);
         if (!trip) return res.status(404).json({ error: 'Trip not found' });
-
-        const insights = await ollama.analyzeTripWithAI(trip, req.body.model);
-        await db.updateTrip(req.params.id, { aiInsights: insights });
-        res.json(insights);
-    } catch (err: any) {
-        console.error('[analyze]', err);
-        res.status(500).json({ error: err.message || 'AI analysis failed' });
-    }
+        const insights = await ollama.analyzeTripWithAI(trip);
+        const updated = await db.updateTrip(req.params.id, { aiInsights: insights });
+        res.json(updated);
+    } catch (err) { console.error('[analyze]', err); res.status(500).json({ error: 'Failed to analyze trip' }); }
 });
 
-// ── Ollama status ────────────────────────────────────────
+app.get('/api/settings', async (_req, res) => {
+    try { res.json(await db.getSettings()); }
+    catch (err) { console.error('[settings-get]', err); res.status(500).json({ error: 'Failed to load settings' }); }
+});
+
+app.put('/api/settings', async (req, res) => {
+    try { res.json(await db.saveSettings(req.body)); }
+    catch (err) { console.error('[settings-put]', err); res.status(500).json({ error: 'Failed to save settings' }); }
+});
+
+app.post('/api/plan/suggest', async (req, res) => {
+    try {
+        const planReq = req.body as PlanRequest;
+        if (!planReq.availableDays || !planReq.travelStyle) {
+            return res.status(400).json({ error: 'availableDays and travelStyle are required' });
+        }
+        const suggestions = await ollama.suggestDestinations(planReq);
+        res.json(suggestions);
+    } catch (err) { console.error('[plan-suggest]', err); res.status(500).json({ error: 'AI suggestion failed' }); }
+});
+
+app.post('/api/plan/detail', async (req, res) => {
+    try {
+        const { destination, country, days, style, currency } = req.body;
+        if (!destination || !days) return res.status(400).json({ error: 'destination and days required' });
+        const plan = await ollama.generateTripPlan(destination, country || '', days, style || 'mixed', currency || 'SEK');
+        res.json(plan);
+    } catch (err) { console.error('[plan-detail]', err); res.status(500).json({ error: 'Failed to generate plan' }); }
+});
+
+app.post('/api/wipe', async (_req, res) => {
+    try { await db.wipeAndReset(); res.json({ ok: true, message: 'All data wiped and settings reset' }); }
+    catch (err) { console.error('[wipe]', err); res.status(500).json({ error: 'Wipe failed' }); }
+});
+
 app.get('/api/ollama/status', async (_req, res) => {
-    try {
-        const config = await ollama.checkOllamaConfig();
-        res.json(config);
-    } catch {
-        res.json({ available: false });
-    }
+    try { res.json(await ollama.getOllamaStatus()); }
+    catch { res.json({ available: false, models: [], travelModels: [] }); }
 });
 
-// ── Seed mock data ───────────────────────────────────────
-app.post('/api/seed', async (_req, res) => {
-    try {
-        const existing = await db.getTrips();
-        if (existing.length > 0) {
-            return res.json({ message: 'Already has data', count: existing.length });
-        }
-        const mocks = getMockTrips();
-        for (const trip of mocks) {
-            await db.createTrip(trip);
-        }
-        res.json({ message: 'Seeded', count: mocks.length });
-    } catch (err) {
-        console.error('[seed]', err);
-        res.status(500).json({ error: 'Seed failed' });
-    }
-});
-
-// ── Boot ─────────────────────────────────────────────────
 async function start() {
     await db.connectDb();
-    app.listen(PORT, () => {
-        console.log(`\n  Triply running at http://localhost:${PORT}\n`);
-    });
+    await db.getSettings();
+    app.listen(PORT, () => console.log(`Triply running on http://localhost:${PORT}`));
 }
 
 start().catch(console.error);

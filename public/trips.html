@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Triply — My Trips</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,300,1,0" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="header">
+    <a class="brand" href="/"><span class="brand-icon">✈️</span><span class="brand-name">Triply</span></a>
+    <nav class="nav">
+        <a class="nav-btn" href="/"><span class="material-symbols-rounded">dashboard</span>Dashboard</a>
+        <a class="nav-btn" href="/plan.html"><span class="material-symbols-rounded">explore</span>Plan a Trip</a>
+        <a class="nav-btn active" href="/trips.html"><span class="material-symbols-rounded">luggage</span>My Trips</a>
+        <a class="nav-btn" href="/settings.html"><span class="material-symbols-rounded">settings</span>Settings</a>
+    </nav>
+    <div class="header-right">
+        <a class="btn btn-primary" href="/plan.html">
+            <span class="material-symbols-rounded">add</span>New Trip
+        </a>
+    </div>
+</header>
+<main class="trips-page">
+    <div class="page-header">
+        <div>
+            <div class="page-title">My Trips</div>
+            <div class="page-sub" id="tripCount">Loading...</div>
+        </div>
+    </div>
+    <div class="tab-row">
+        <button class="tab-btn active" onclick="filterTrips('all', this)">All</button>
+        <button class="tab-btn" onclick="filterTrips('scheduled', this)">Scheduled</button>
+        <button class="tab-btn" onclick="filterTrips('planned', this)">Planned</button>
+        <button class="tab-btn" onclick="filterTrips('ongoing', this)">Ongoing</button>
+        <button class="tab-btn" onclick="filterTrips('completed', this)">Completed</button>
+    </div>
+    <div class="trips-grid" id="tripsGrid">
+        <div class="loading"><div class="spinner"></div>Loading trips...</div>
+    </div>
+</main>
+<div id="tripModal" style="display:none"></div>
+<div class="toasts" id="toasts"></div>
+<script src="trips.js"></script>
+</body>
+</html>
