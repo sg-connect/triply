@@ -1,5 +1,6 @@
 let days = 7, travelStyle = '', budget = 20000;
 let settings = {}, suggestions = [], selectedDest = null, detailPlan = null, currentStep = 1;
+let inputMode = 'wizard';
 
 async function init() {
     settings = await fetch('/api/settings').then(r => r.json()).catch(() => ({}));
@@ -134,8 +135,67 @@ function goStep(n) {
     }
 }
 
+function switchMode(mode) {
+    inputMode = mode;
+    document.getElementById('tabWizard').classList.toggle('active', mode === 'wizard');
+    document.getElementById('tabPrompt').classList.toggle('active', mode === 'prompt');
+    document.getElementById('promptPanel').style.display = mode === 'prompt' ? 'block' : 'none';
+    document.getElementById('stepBar').style.display = mode === 'wizard' ? 'flex' : 'none';
+    if (mode === 'wizard') {
+        goStep(1);
+    } else {
+        document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
+    }
+}
+
+function useExample(text) {
+    document.getElementById('tripPrompt').value = text;
+}
+
+async function getFromPrompt() {
+    const promptText = (document.getElementById('tripPrompt').value || '').trim();
+    if (!promptText) { toast('Please describe your trip first', 'err'); return; }
+    const curr = settings.currency === 'USD' ? 'USD' : 'SEK';
+    document.getElementById('promptPanel').style.display = 'none';
+    document.getElementById('stepBar').style.display = 'flex';
+    document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('step4').classList.add('active');
+    for (let i = 1; i <= 6; i++) {
+        const dot = document.getElementById('dot' + i);
+        if (!dot) continue;
+        dot.classList.remove('active', 'done');
+        if (i === 4) dot.classList.add('active');
+        else if (i < 4) dot.classList.add('done');
+    }
+    selectedDest = null;
+    document.getElementById('detailBtn').style.display = 'none';
+    document.getElementById('s4summary').textContent = 'your description';
+    document.getElementById('destGrid').innerHTML = '<div class="loading" style="grid-column:1/-1"><div class="spinner"></div>AI + web search is finding the best destinations\u2026</div>';
+    try {
+        const data = await fetch('/api/plan/from-prompt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: promptText, currency: curr }),
+        }).then(r => r.json());
+        suggestions = Array.isArray(data) ? data : [];
+        if (!suggestions.length) throw new Error('No suggestions');
+        renderSuggestions();
+    } catch {
+        document.getElementById('destGrid').innerHTML = '<div style="color:var(--danger);padding:20px;text-align:center;grid-column:1/-1">AI could not get suggestions.<br><small>Make sure Ollama is running with a model.</small><br><br><button class="btn btn-secondary" onclick="getFromPrompt()">Try again</button></div>';
+    }
+}
+
+function step4Back() {
+    if (inputMode === 'prompt') {
+        document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
+        document.getElementById('stepBar').style.display = 'none';
+        document.getElementById('promptPanel').style.display = 'block';
+    } else {
+        goStep(3);
+    }
+}
+
 async function getSuggestions() {
-    if (!travelStyle) { toast('Please pick a travel style first', 'err'); goStep(2); return; }
     goStep(4);
     selectedDest = null;
     document.getElementById('detailBtn').style.display = 'none';

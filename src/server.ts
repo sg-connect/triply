@@ -111,6 +111,36 @@ app.post('/api/plan/detail', async (req, res) => {
     } catch (err) { console.error('[plan-detail]', err); res.status(500).json({ error: 'Failed to generate plan' }); }
 });
 
+app.post('/api/plan/from-prompt', async (req, res) => {
+    try {
+        const { prompt, currency } = req.body;
+        if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
+            return res.status(400).json({ error: 'prompt is required' });
+        }
+        let webContext = '';
+        try {
+            const q = encodeURIComponent(`best travel destinations ${prompt.slice(0, 100)}`);
+            const ddgRes = await fetch(`https://api.duckduckgo.com/?q=${q}&format=json&no_html=1&skip_disambig=1`, {
+                headers: { 'User-Agent': 'Triply/1.0' },
+                signal: AbortSignal.timeout(5000),
+            });
+            const ddgData = await ddgRes.json() as any;
+            const parts: string[] = [];
+            if (ddgData.AbstractText) parts.push(ddgData.AbstractText);
+            if (Array.isArray(ddgData.RelatedTopics)) {
+                for (const t of (ddgData.RelatedTopics as any[]).slice(0, 4)) {
+                    if (t.Text) parts.push(t.Text);
+                }
+            }
+            webContext = parts.join('\n');
+        } catch {
+            console.warn('[from-prompt] web search skipped');
+        }
+        const suggestions = await ollama.suggestFromFreePrompt(prompt.trim(), currency || 'SEK', webContext || undefined);
+        res.json(suggestions);
+    } catch (err) { console.error('[from-prompt]', err); res.status(500).json({ error: 'Failed to get suggestions from prompt' }); }
+});
+
 app.post('/api/wipe', async (_req, res) => {
     try { await db.wipeAndReset(); res.json({ ok: true, message: 'All data wiped and settings reset' }); }
     catch (err) { console.error('[wipe]', err); res.status(500).json({ error: 'Wipe failed' }); }

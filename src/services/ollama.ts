@@ -165,6 +165,42 @@ Return ONLY a JSON object:
     return insights;
 }
 
+export async function suggestFromFreePrompt(userPrompt: string, currency: string, webContext?: string): Promise<DestinationSuggestion[]> {
+    const curr = currency === 'USD' ? 'USD' : 'SEK';
+    const contextSection = webContext ? `\n\nAdditional context from web research:\n${webContext}` : '';
+    const prompt = `You are an expert travel planner. A traveler has described their ideal trip:
+
+"${userPrompt}"${contextSection}
+
+Based on their description, suggest 4 perfect travel destinations. Infer the travel style, budget preferences, and duration from the description. If they mention a specific place, include it and suggest complementary alternatives.
+
+Return ONLY a JSON array with exactly 4 destinations:
+[
+  {
+    "country": "Japan",
+    "city": "Tokyo",
+    "flag": "🇯🇵",
+    "tagline": "Ultra-modern city meets ancient tradition",
+    "travelStyle": ["culture", "urban"],
+    "daysMin": 7,
+    "daysMax": 14,
+    "budgetMin": 20000,
+    "budgetMax": 35000,
+    "flightHours": 10,
+    "directFlight": false,
+    "tips": ["Get a JR Pass", "Try local ramen", "Visit teamLab Borderless"],
+    "nearby": [{"destination": "Kyoto", "country": "Japan", "flag": "🇯🇵", "extraDays": 3, "reason": "Ancient temples just 2h by bullet train"}],
+    "bestMonths": [3, 4, 10, 11],
+    "why": "Matches your description perfectly"
+  }
+]
+
+All budget amounts must be in ${curr}. Return only the JSON array, no other text.`;
+
+    const raw = await ask(prompt);
+    return parseJson<DestinationSuggestion[]>(raw, []);
+}
+
 export async function getOllamaStatus(): Promise<{ available: boolean; models: string[]; travelModels: string[] }> {
     try {
         const res = await fetch(`${OLLAMA_URL}/api/tags`);

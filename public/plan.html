@@ -31,7 +31,37 @@
         <p>Tell us your preferences and AI will find the perfect destination for you</p>
     </div>
 
-    <div class="step-bar">
+    <div class="mode-tabs">
+        <button class="mode-tab active" id="tabWizard" onclick="switchMode('wizard')">
+            <span class="material-symbols-rounded">tune</span>AI Wizard
+        </button>
+        <button class="mode-tab" id="tabPrompt" onclick="switchMode('prompt')">
+            <span class="material-symbols-rounded">draw</span>Describe It
+        </button>
+    </div>
+
+    <div id="promptPanel" style="display:none">
+        <div class="step-card">
+            <div class="step-title">Describe your dream trip</div>
+            <div class="step-sub">Tell AI what you're looking for — destination ideas, vibe, budget, duration, anything. AI will search and give you options.</div>
+            <textarea id="tripPrompt" class="prompt-input" placeholder="e.g. I want somewhere warm in Europe, maybe a beach or islands, relaxing and not too expensive, around 10 days in July..." rows="4"></textarea>
+            <div class="prompt-examples">
+                <div class="prompt-ex-label">Try an example:</div>
+                <div class="prompt-chips">
+                    <button class="prompt-chip" onclick="useExample('Warm beach destination in Southeast Asia, 7-10 days, budget around 15000 SEK, good for couples')">Tropical beach</button>
+                    <button class="prompt-chip" onclick="useExample('European city break with culture and food, 4-5 days in spring, moderate budget')">European city</button>
+                    <button class="prompt-chip" onclick="useExample('Adventure trip with mountains or national parks, hiking and outdoor activities, 10-14 days')">Mountain adventure</button>
+                    <button class="prompt-chip" onclick="useExample('Japan or East Asia, mix of culture and modern city life, about 2 weeks')">East Asia</button>
+                </div>
+            </div>
+        </div>
+        <div class="step-nav" style="margin-top:16px">
+            <span></span>
+            <button class="btn btn-primary" onclick="getFromPrompt()">Find Destinations <span class="material-symbols-rounded">auto_awesome</span></button>
+        </div>
+    </div>
+
+    <div id="stepBar" class="step-bar">
         <div class="step-dot active" id="dot1">1</div>
         <div class="step-line"></div>
         <div class="step-dot" id="dot2">2</div>
@@ -150,7 +180,7 @@
             </div>
         </div>
         <div class="step-nav">
-            <button class="btn btn-secondary" onclick="goStep(3)"><span class="material-symbols-rounded">arrow_back</span> Back</button>
+            <button class="btn btn-secondary" id="step4Back" onclick="step4Back()"><span class="material-symbols-rounded">arrow_back</span> Back</button>
             <button class="btn btn-primary" id="detailBtn" style="display:none" onclick="getDetail()">Build My Plan <span class="material-symbols-rounded">arrow_forward</span></button>
         </div>
     </div>
