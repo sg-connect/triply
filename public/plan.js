@@ -1,6 +1,12 @@
 let days = 7, travelStyle = '', budget = 20000;
-let settings = {}, suggestions = [], selectedDest = null, detailPlan = null, currentStep = 1;
-let inputMode = 'wizard';
+let settings = {};
+let allCountries = [], selectedCountry = null, selectedCountryInfo = null;
+let selectedCities = [], weatherResults = [], detailPlan = null;
+let currentStep = 1;
+
+// ============================
+// Init
+// ============================
 
 async function init() {
     settings = await fetch('/api/settings').then(r => r.json()).catch(() => ({}));
@@ -9,9 +15,12 @@ async function init() {
     budget = (settings.budgetRange && settings.budgetRange.max) || 20000;
     updateDaysDisplay();
     updateBudget();
+    document.getElementById('budgetSlider').value = budget;
+    const info = document.getElementById('vacDaysInfo');
+    if (info) info.textContent = left + ' vacation days remaining';
     loadHolidays();
     loadAiStatus();
-    document.getElementById('budgetSlider').value = budget;
+    loadCountries();
 }
 
 async function loadAiStatus() {
@@ -32,13 +41,178 @@ async function loadAiStatus() {
     }
 }
 
+// ============================
+// Step 1: Country Selection
+// ============================
+
+async function loadCountries() {
+    try {
+        allCountries = await fetch('/api/countries').then(r => r.json());
+        renderCountries(allCountries);
+    } catch {
+        document.getElementById('countryGrid').innerHTML = '<div style="color:var(--danger);padding:12px">Failed to load countries. Check your internet connection.</div>';
+    }
+}
+
+function filterCountries() {
+    const q = (document.getElementById('countrySearch').value || '').toLowerCase().trim();
+    if (!q) { renderCountries(allCountries); return; }
+    const filtered = allCountries.filter(c =>
+        c.name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q) || (c.capital || '').toLowerCase().includes(q)
+    );
+    renderCountries(filtered);
+}
+
+function renderCountries(list) {
+    const grid = document.getElementById('countryGrid');
+    if (!list.length) { grid.innerHTML = '<div style="color:var(--text-secondary);padding:12px">No countries match your search</div>'; return; }
+    // Show popular regions first, then alphabetical
+    const popular = ['ES', 'IT', 'GR', 'FR', 'PT', 'HR', 'TH', 'JP', 'TR', 'GB', 'US', 'MX', 'ID', 'MA', 'NO', 'AT'];
+    const sorted = [...list].sort((a, b) => {
+        const aP = popular.indexOf(a.code);
+        const bP = popular.indexOf(b.code);
+        if (aP >= 0 && bP >= 0) return aP - bP;
+        if (aP >= 0) return -1;
+        if (bP >= 0) return 1;
+        return a.name.localeCompare(b.name);
+    });
+    grid.innerHTML = sorted.slice(0, 60).map(c =>
+        `<div class="country-card${selectedCountry?.code === c.code ? ' selected' : ''}" onclick="pickCountry('${c.code}')">
+            <span class="country-flag">${c.flag}</span>
+            <span class="country-name">${c.name}</span>
+        </div>`
+    ).join('');
+}
+
+async function pickCountry(code) {
+    selectedCountry = allCountries.find(c => c.code === code);
+    selectedCities = [];
+    document.querySelectorAll('.country-card').forEach(el => el.classList.remove('selected'));
+    const clicked = document.querySelector(`.country-card[onclick="pickCountry('${code}')"]`);
+    if (clicked) clicked.classList.add('selected');
+    document.getElementById('step1Next').disabled = false;
+
+    // Pre-fetch full country info
+    try {
+        selectedCountryInfo = await fetch('/api/countries/' + code).then(r => r.json());
+    } catch { selectedCountryInfo = selectedCountry; }
+}
+
+// ============================
+// Step 2: City Selection
+// ============================
+
+async function loadCities() {
+    if (!selectedCountry) return;
+    document.getElementById('selectedCountryFlag').textContent = selectedCountry.flag;
+    document.getElementById('selectedCountryName').textContent = selectedCountry.name;
+
+    // Show country info bar
+    if (selectedCountryInfo) {
+        const ci = selectedCountryInfo;
+        document.getElementById('countryInfoBar').style.display = 'flex';
+        document.getElementById('ciCapital').textContent = ci.capital || '—';
+        document.getElementById('ciCurrency').textContent = (ci.currencies || []).join(', ') || '—';
+        document.getElementById('ciLanguage').textContent = (ci.languages || []).slice(0, 2).join(', ') || '—';
+        document.getElementById('ciRegion').textContent = [ci.region, ci.subregion].filter(Boolean).join(' / ') || '—';
+    }
+
+    const grid = document.getElementById('cityGrid');
+    grid.innerHTML = '<div class="loading"><div class="spinner"></div>Loading cities...</div>';
+    try {
+        const cities = await fetch('/api/countries/' + selectedCountry.code + '/cities').then(r => r.json());
+        if (!cities.length) {
+            grid.innerHTML = '<div style="color:var(--text-secondary);padding:12px">No popular cities listed for this country yet. You can type a custom city below.</div>'
+                + '<input type="text" id="customCity" class="country-search" placeholder="Type a city name..." style="margin-top:8px">'
+                + '<button class="btn btn-secondary" style="margin-top:8px" onclick="addCustomCity()">Add City</button>';
+            return;
+        }
+        grid.innerHTML = cities.map(city =>
+            `<div class="city-card" onclick="toggleCity(this, '${city.replaceAll("'", "&#39;")}')" data-city="${city}">
+                <span class="city-name">${city}</span>
+                <span class="city-check material-symbols-rounded">check_circle</span>
+            </div>`
+        ).join('')
+        + '<div style="margin-top:12px;display:flex;gap:8px;align-items:center">'
+        + '<input type="text" id="customCity" class="country-search" placeholder="Or add a different city..." style="flex:1;margin:0">'
+        + '<button class="btn btn-secondary" onclick="addCustomCity()" style="white-space:nowrap">+ Add</button>'
+        + '</div>';
+
+        // Restore selections
+        selectedCities.forEach(city => {
+            const card = grid.querySelector(`[data-city="${city}"]`);
+            if (card) card.classList.add('selected');
+        });
+    } catch {
+        grid.innerHTML = '<div style="color:var(--danger);padding:12px">Failed to load cities</div>';
+    }
+}
+
+function toggleCity(el, city) {
+    if (selectedCities.includes(city)) {
+        selectedCities = selectedCities.filter(c => c !== city);
+        el.classList.remove('selected');
+    } else {
+        selectedCities.push(city);
+        el.classList.add('selected');
+    }
+    document.getElementById('step2Next').disabled = selectedCities.length === 0;
+}
+
+function addCustomCity() {
+    const input = document.getElementById('customCity');
+    const city = (input.value || '').trim();
+    if (!city) return;
+    if (selectedCities.includes(city)) { input.value = ''; return; }
+    selectedCities.push(city);
+    input.value = '';
+    // Add a visual card
+    const grid = document.getElementById('cityGrid');
+    const div = document.createElement('div');
+    div.className = 'city-card selected';
+    div.dataset.city = city;
+    div.onclick = function() { toggleCity(div, city); };
+    div.innerHTML = `<span class="city-name">${city}</span><span class="city-check material-symbols-rounded">check_circle</span>`;
+    grid.insertBefore(div, grid.querySelector('div[style]'));
+    document.getElementById('step2Next').disabled = false;
+}
+
+// ============================
+// Step 3: Details (days, style, budget, holidays)
+// ============================
+
+function adjustDays(d) {
+    days = Math.max(1, Math.min(30, days + d));
+    updateDaysDisplay();
+}
+
+function updateDaysDisplay() {
+    const el = document.getElementById('daysDisplay');
+    if (el) el.textContent = days;
+}
+
+function selectStyle(el) {
+    document.querySelectorAll('.style-mini').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+    travelStyle = el.dataset.style;
+}
+
+function updateBudget() {
+    const v = Number.parseInt(document.getElementById('budgetSlider').value, 10);
+    budget = v;
+    const curr = settings.currency === 'USD' ? 'USD' : 'kr';
+    const display = curr === 'USD' ? '$' + v.toLocaleString() : v.toLocaleString('sv-SE') + ' kr';
+    document.getElementById('budgetDisplay').textContent = display;
+}
+
+function onDateChange() {
+    // Refresh holiday combos if date changes
+}
+
+// Holiday combos (same logic as before)
 function loadHolidays() {
     const today = new Date().toISOString().split('T')[0];
     const upcoming = (settings.publicHolidays || []).filter(h => h.date >= today);
-    const info = document.getElementById('vacDaysInfo');
-    const left = (settings.vacationDaysTotal || 25) - (settings.vacationDaysUsed || 0);
-    if (info) info.textContent = left + ' vacation days remaining';
-
     const combos = buildCombos(upcoming.slice(0, 12));
     const list = document.getElementById('holidayList');
     if (!list) return;
@@ -53,28 +227,49 @@ function loadHolidays() {
                 <div class="holiday-bonus">${c.bonus}</div>
             </div>
             <span class="holiday-date-tag">${c.dateLabel}</span>
-            <span class="holiday-days-tag">${c.totalDays} days</span>
+            <span class="holiday-days-tag">${c.totalDays} days${c.vacDays > 0 ? ' (' + c.vacDays + ' vacation)' : ' (free!)'}</span>
         </div>`
     ).join('');
 }
 
-function buildCombos(holidays) {
-    return holidays.map(h => {
-        const d = new Date(h.date);
+function countVacationDays(startDate, endDate, holidayDates) {
+    let count = 0;
+    const d = new Date(startDate);
+    const last = endDate.getTime();
+    while (d.getTime() <= last) {
         const dow = d.getDay();
-        let extra = 2, bonus = 'Extended weekend!';
-        if (dow === 1) { extra = 3; bonus = 'Take Fri off \u2014 4-day weekend!'; }
-        else if (dow === 5) { extra = 3; bonus = 'Take Mon off \u2014 4-day weekend!'; }
-        else if (dow === 2) { extra = 4; bonus = 'Take Mon+Fri off \u2014 5-day trip!'; }
-        else if (dow === 4) { extra = 4; bonus = 'Take Thu+Fri off \u2014 5-day trip!'; }
-        else if (dow === 3) { extra = 2; bonus = 'Bridge the week \u2014 3-day trip!'; }
-        return {
-            name: h.name,
-            date: h.date,
-            dateLabel: new Date(h.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }),
-            totalDays: extra + 1,
-            bonus,
-        };
+        const iso = d.toISOString().split('T')[0];
+        if (dow !== 0 && dow !== 6 && !holidayDates.has(iso)) count++;
+        d.setDate(d.getDate() + 1);
+    }
+    return count;
+}
+
+const COMBO_RULES = {
+    1: { startOff: -3, endOff: 0, bonus: 'Take Fri off \u2014 4-day weekend!' },
+    2: { startOff: -1, endOff: 5, bonus: 'Take Mon off \u2014 5-day trip!' },
+    3: { startOff:  0, endOff: 0, bonus: 'Midweek break \u2014 enjoy the day off!' },
+    4: { startOff:  0, endOff: 3, bonus: 'Take Fri off \u2014 4-day trip!' },
+    5: { startOff:  0, endOff: 3, bonus: 'Take Mon off \u2014 4-day weekend!' },
+};
+
+function comboWindow(holidayDate) {
+    const d = new Date(holidayDate);
+    const dow = d.getDay();
+    const rule = COMBO_RULES[dow];
+    if (!rule) return { start: d, end: d, bonus: 'Weekend holiday!' };
+    const start = new Date(d); start.setDate(start.getDate() + rule.startOff);
+    const end = new Date(d); end.setDate(end.getDate() + rule.endOff);
+    return { start, end, bonus: rule.bonus };
+}
+
+function buildCombos(holidays) {
+    const holidayDates = new Set(holidays.map(h => h.date));
+    return holidays.map(h => {
+        const { start, end, bonus } = comboWindow(h.date);
+        const totalDays = Math.round((end - start) / 86400000) + 1;
+        const vacDays = countVacationDays(start, end, holidayDates);
+        return { name: h.name, date: h.date, dateLabel: new Date(h.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }), totalDays, vacDays, bonus };
     }).sort((a, b) => a.date.localeCompare(b.date)).slice(0, 5);
 }
 
@@ -83,201 +278,200 @@ function selectCombo(i) {
     const upcoming = (settings.publicHolidays || []).filter(h => h.date >= today);
     const combos = buildCombos(upcoming.slice(0, 12));
     if (!combos[i]) return;
-    days = combos[i].totalDays;
+    days = combos[i].vacDays || 1;
     document.getElementById('startDate').value = combos[i].date;
     updateDaysDisplay();
     document.querySelectorAll('.holiday-item').forEach((el, idx) => el.classList.toggle('selected', idx === i));
 }
 
-function adjustDays(d) {
-    days = Math.max(2, Math.min(30, days + d));
-    updateDaysDisplay();
-}
+// ============================
+// Step 4: Fetch Weather + AI Plan
+// ============================
 
-function updateDaysDisplay() {
-    const el = document.getElementById('daysDisplay');
-    if (el) el.textContent = days;
-}
+let cityProfiles = [];
 
-function selectStyle(el) {
-    document.querySelectorAll('.style-card').forEach(c => c.classList.remove('selected'));
-    el.classList.add('selected');
-    travelStyle = el.dataset.style;
-}
+async function fetchWeatherAndPlan() {
+    if (!travelStyle) { toast('Please pick a travel style', 'err'); return; }
+    if (!selectedCities.length) { toast('No cities selected', 'err'); return; }
 
-function updateBudget() {
-    const v = parseInt(document.getElementById('budgetSlider').value);
-    budget = v;
-    const curr = settings.currency === 'USD' ? 'USD' : 'kr';
-    const display = curr === 'USD' ? '$' + v.toLocaleString() : v.toLocaleString('sv-SE') + ' kr';
-    document.getElementById('budgetDisplay').textContent = display;
-}
-
-function setBudgetPreset(v) {
-    document.getElementById('budgetSlider').value = v;
-    updateBudget();
-}
-
-function goStep(n) {
-    if (n === 2 && !days) { toast('Please set number of days', 'err'); return; }
-    if (n === 3 && !travelStyle) { toast('Please pick a travel style', 'err'); return; }
-    if (n === 6) renderConfirm();
-    currentStep = n;
-    document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
-    const panel = document.getElementById('step' + n);
-    if (panel) panel.classList.add('active');
-    for (let i = 1; i <= 6; i++) {
-        const dot = document.getElementById('dot' + i);
-        if (!dot) continue;
-        dot.classList.remove('active', 'done');
-        if (i < n) dot.classList.add('done');
-        else if (i === n) dot.classList.add('active');
-    }
-}
-
-function switchMode(mode) {
-    inputMode = mode;
-    document.getElementById('tabWizard').classList.toggle('active', mode === 'wizard');
-    document.getElementById('tabPrompt').classList.toggle('active', mode === 'prompt');
-    document.getElementById('promptPanel').style.display = mode === 'prompt' ? 'block' : 'none';
-    document.getElementById('stepBar').style.display = mode === 'wizard' ? 'flex' : 'none';
-    if (mode === 'wizard') {
-        goStep(1);
-    } else {
-        document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
-    }
-}
-
-function useExample(text) {
-    document.getElementById('tripPrompt').value = text;
-}
-
-async function getFromPrompt() {
-    const promptText = (document.getElementById('tripPrompt').value || '').trim();
-    if (!promptText) { toast('Please describe your trip first', 'err'); return; }
-    const curr = settings.currency === 'USD' ? 'USD' : 'SEK';
-    document.getElementById('promptPanel').style.display = 'none';
-    document.getElementById('stepBar').style.display = 'flex';
-    document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
-    document.getElementById('step4').classList.add('active');
-    for (let i = 1; i <= 6; i++) {
-        const dot = document.getElementById('dot' + i);
-        if (!dot) continue;
-        dot.classList.remove('active', 'done');
-        if (i === 4) dot.classList.add('active');
-        else if (i < 4) dot.classList.add('done');
-    }
-    selectedDest = null;
-    document.getElementById('detailBtn').style.display = 'none';
-    document.getElementById('s4summary').textContent = 'your description';
-    document.getElementById('destGrid').innerHTML = '<div class="loading" style="grid-column:1/-1"><div class="spinner"></div>AI + web search is finding the best destinations\u2026</div>';
-    try {
-        const data = await fetch('/api/plan/from-prompt', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt: promptText, currency: curr }),
-        }).then(r => r.json());
-        suggestions = Array.isArray(data) ? data : [];
-        if (!suggestions.length) throw new Error('No suggestions');
-        renderSuggestions();
-    } catch {
-        document.getElementById('destGrid').innerHTML = '<div style="color:var(--danger);padding:20px;text-align:center;grid-column:1/-1">AI could not get suggestions.<br><small>Make sure Ollama is running with a model.</small><br><br><button class="btn btn-secondary" onclick="getFromPrompt()">Try again</button></div>';
-    }
-}
-
-function step4Back() {
-    if (inputMode === 'prompt') {
-        document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
-        document.getElementById('stepBar').style.display = 'none';
-        document.getElementById('promptPanel').style.display = 'block';
-    } else {
-        goStep(3);
-    }
-}
-
-async function getSuggestions() {
     goStep(4);
-    selectedDest = null;
-    document.getElementById('detailBtn').style.display = 'none';
-    const curr = settings.currency === 'USD' ? 'USD' : 'SEK';
-    document.getElementById('s4summary').textContent = `${days} days \u2022 ${travelStyle} \u2022 ${budget.toLocaleString()} ${curr}`;
-    document.getElementById('destGrid').innerHTML = '<div class="loading" style="grid-column:1/-1"><div class="spinner"></div>AI is finding the best destinations for you\u2026</div>';
-    const startDate = document.getElementById('startDate').value;
-    const month = startDate ? new Date(startDate).getMonth() + 1 : new Date().getMonth() + 1;
+    const startDate = document.getElementById('startDate').value || new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
+    const curr = settings.currency || 'SEK';
+    const citiesLabel = selectedCities.join(', ');
+    document.getElementById('planTitle').textContent = (selectedCountry?.flag || '') + ' ' + citiesLabel + ', ' + (selectedCountry?.name || '');
+    document.getElementById('planSub').textContent = days + '-day ' + travelStyle + ' trip';
+    document.getElementById('planDetail').innerHTML = '<div class="loading"><div class="spinner"></div>Fetching city info from Wikipedia, weather from Open-Meteo, and live currency rates...</div>';
+    document.getElementById('weatherSection').style.display = 'none';
+    document.getElementById('citiesSection').style.display = 'none';
+
+    // 1. Fetch full city enrichment for all selected cities in parallel
+    cityProfiles = [];
+    weatherResults = [];
     try {
-        const data = await fetch('/api/plan/suggest', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                availableDays: days,
-                startDate,
-                travelStyle,
-                budgetMin: Math.round(budget * 0.6),
-                budgetMax: budget,
-                currency: curr,
-                preferredTransport: settings.preferredTransport || ['flight'],
-                month,
-            }),
-        }).then(r => r.json());
-        suggestions = Array.isArray(data) ? data : [];
-        if (!suggestions.length) throw new Error('No suggestions');
-        renderSuggestions();
-    } catch {
-        document.getElementById('destGrid').innerHTML = '<div style="color:var(--danger);padding:20px;text-align:center;grid-column:1/-1">AI could not get suggestions.<br><small>Make sure Ollama is running with a model.</small><br><br><button class="btn btn-secondary" onclick="getSuggestions()">Try again</button></div>';
-    }
-}
+        const enrichPromises = selectedCities.map(city =>
+            fetch(`/api/city/enrich?city=${encodeURIComponent(city)}&country=${encodeURIComponent(selectedCountry?.name || '')}&countryCode=${encodeURIComponent(selectedCountry?.code || '')}&startDate=${startDate}&days=${days}&homeCurrency=${curr}`)
+                .then(r => r.ok ? r.json() : null)
+                .catch(() => null)
+        );
+        cityProfiles = (await Promise.all(enrichPromises)).filter(Boolean);
+        weatherResults = cityProfiles.map(p => p.weather).filter(Boolean);
 
-function renderSuggestions() {
-    const curr = settings.currency === 'USD' ? 'USD' : 'kr';
-    document.getElementById('destGrid').innerHTML = suggestions.map((s, i) =>
-        `<div class="dest-card" id="dest${i}" onclick="pickDest(${i})">
-            <div class="dest-flag">${s.flag || '🌍'}</div>
-            <div class="dest-city">${s.city}</div>
-            <div class="dest-country">${s.country}</div>
-            <div class="dest-tagline">${s.tagline || ''}</div>
-            <div class="dest-tags">
-                ${s.directFlight ? '<span class="dest-tag direct">\u2708\uFE0F Direct</span>' : ''}
-                ${s.flightHours ? `<span class="dest-tag">\u23F1 ${s.flightHours}h</span>` : ''}
-                ${(s.travelStyle || []).slice(0,2).map(st => `<span class="dest-tag">${st}</span>`).join('')}
-            </div>
-            <div class="dest-row">
-                <div class="dest-budget">${s.budgetMin ? s.budgetMin.toLocaleString() : '?'}\u2013${s.budgetMax ? s.budgetMax.toLocaleString() : '?'} ${curr}</div>
-                <div class="dest-days">${s.daysMin || '?'}\u2013${s.daysMax || '?'} days</div>
-            </div>
-            <div class="dest-why">${s.why || ''}</div>
-        </div>`
-    ).join('');
-}
+        if (cityProfiles.length) {
+            document.getElementById('citiesSection').style.display = 'block';
+            renderCityProfiles(cityProfiles);
+        }
+        if (weatherResults.length) {
+            document.getElementById('weatherSection').style.display = 'block';
+            renderWeatherCards(weatherResults);
+        }
+    } catch { /* enrichment is optional */ }
 
-function pickDest(i) {
-    document.querySelectorAll('.dest-card').forEach((c, idx) => c.classList.toggle('selected', idx === i));
-    selectedDest = suggestions[i];
-    document.getElementById('detailBtn').style.display = 'inline-flex';
-}
+    // 2. Send everything to AI for planning
+    document.getElementById('planDetail').innerHTML = '<div class="loading"><div class="spinner"></div>AI is planning your trip using real city data, weather, and currency rates...</div>';
 
-async function getDetail() {
-    if (!selectedDest) return;
-    goStep(5);
-    document.getElementById('detailTitle').textContent = (selectedDest.flag || '') + ' ' + selectedDest.city + ', ' + selectedDest.country;
-    document.getElementById('detailSub').textContent = days + '-day ' + travelStyle + ' trip \u2014 full AI plan';
-    document.getElementById('planDetail').innerHTML = '<div class="loading"><div class="spinner"></div>Building your day-by-day plan\u2026</div>';
     try {
+        const destination = selectedCities.length === 1 ? selectedCities[0] : selectedCities.join(' + ');
         detailPlan = await fetch('/api/plan/detail', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                destination: selectedDest.city,
-                country: selectedDest.country,
+                destination,
+                country: selectedCountry?.name || '',
                 days,
                 style: travelStyle,
-                currency: settings.currency || 'SEK',
+                currency: curr,
+                weatherData: weatherResults.length ? weatherResults[0] : null,
+                countryInfo: selectedCountryInfo || null,
+                cityProfiles,
             }),
         }).then(r => r.json());
+
         renderDetail();
     } catch {
-        document.getElementById('planDetail').innerHTML = '<div style="color:var(--danger);padding:20px">Failed to generate plan. Check Ollama is running.</div>';
+        document.getElementById('planDetail').innerHTML = '<div style="color:var(--danger);padding:20px">Failed to generate plan. Make sure Ollama is running.</div>';
     }
 }
+
+function renderCityProfiles(profiles) {
+    const container = document.getElementById('cityProfiles');
+    container.innerHTML = profiles.map(p => {
+        const s = p.summary || {};
+        const g = p.guide || {};
+        const c = p.currency;
+        const seeList = (g.see || []).slice(0, 6);
+        const doList = (g.doActivities || []).slice(0, 5);
+        const eatList = (g.eat || []).slice(0, 4);
+        const drinkList = (g.drink || []).slice(0, 3);
+
+        return `<div class="city-profile">
+            ${s.thumbnail ? `<div class="cp-image" style="background-image:url('${s.thumbnail}')"></div>` : ''}
+            <div class="cp-content">
+                <div class="cp-header">
+                    <div class="cp-title">${p.city}${s.description ? ` <span class="cp-desc">· ${s.description}</span>` : ''}</div>
+                    ${s.url ? `<a href="${s.url}" target="_blank" class="cp-link" rel="noopener">Wikipedia &#8599;</a>` : ''}
+                </div>
+                ${s.extract ? `<p class="cp-extract">${s.extract}</p>` : ''}
+
+                ${c?.rate ? `<div class="cp-currency">💱 1 ${c.base} = ${c.rate.toFixed(4)} ${c.target}</div>` : ''}
+
+                ${seeList.length || doList.length || eatList.length ? '<div class="cp-sections">' : ''}
+                ${seeList.length ? `<div class="cp-section">
+                    <div class="cp-section-title">🏛️ See</div>
+                    <ul class="cp-list">${seeList.map(i => `<li>${i}</li>`).join('')}</ul>
+                </div>` : ''}
+                ${doList.length ? `<div class="cp-section">
+                    <div class="cp-section-title">🎯 Do</div>
+                    <ul class="cp-list">${doList.map(i => `<li>${i}</li>`).join('')}</ul>
+                </div>` : ''}
+                ${eatList.length ? `<div class="cp-section">
+                    <div class="cp-section-title">🍽️ Eat</div>
+                    <ul class="cp-list">${eatList.map(i => `<li>${i}</li>`).join('')}</ul>
+                </div>` : ''}
+                ${drinkList.length ? `<div class="cp-section">
+                    <div class="cp-section-title">🍸 Drink</div>
+                    <ul class="cp-list">${drinkList.map(i => `<li>${i}</li>`).join('')}</ul>
+                </div>` : ''}
+                ${seeList.length || doList.length || eatList.length ? '</div>' : ''}
+
+                ${g.url ? `<a href="${g.url}" target="_blank" class="cp-wikivoyage" rel="noopener">Full Wikivoyage guide &#8599;</a>` : ''}
+            </div>
+        </div>`;
+    }).join('');
+}
+
+const WEATHER_ICONS = {
+    0: '☀️',    // Clear sky
+    1: '🌤️',   // Mainly clear
+    2: '⛅',    // Partly cloudy
+    3: '☁️',    // Overcast
+    45: '🌫️',  // Foggy
+    48: '🌫️',  // Rime fog
+    51: '🌦️',  // Light drizzle
+    53: '🌧️',  // Moderate drizzle
+    55: '🌧️',  // Dense drizzle
+    61: '🌦️',  // Slight rain
+    63: '🌧️',  // Moderate rain
+    65: '🌧️',  // Heavy rain
+    71: '🌨️',  // Slight snow
+    73: '❄️',   // Moderate snow
+    75: '❄️',   // Heavy snow
+    80: '🌦️',  // Slight showers
+    81: '🌧️',  // Moderate showers
+    82: '⛈️',   // Violent showers
+    95: '⛈️',   // Thunderstorm
+    96: '⛈️',   // Thunderstorm + hail
+    99: '⛈️',   // Thunderstorm + heavy hail
+};
+
+function weatherIcon(code) {
+    return WEATHER_ICONS[code] || '🌡️';
+}
+
+function summaryIcon(label) {
+    if (!label) return '🌡️';
+    const l = label.toLowerCase();
+    if (l.includes('hot') || l.includes('sunny')) return '☀️';
+    if (l.includes('warm') && l.includes('sunny')) return '🌤️';
+    if (l.includes('warm')) return '⛅';
+    if (l.includes('pleasant') || l.includes('mild') && !l.includes('rain')) return '🌤️';
+    if (l.includes('rain')) return '🌧️';
+    if (l.includes('cool') && l.includes('dry')) return '🌥️';
+    if (l.includes('cool')) return '🌥️';
+    if (l.includes('cold')) return '❄️';
+    return '🌡️';
+}
+
+function renderWeatherCards(results) {
+    const cards = document.getElementById('weatherCards');
+    cards.innerHTML = results.map(w => {
+        const s = w.summary || {};
+        const dailyHtml = (w.daily || []).slice(0, 7).map(d =>
+            `<div class="wd-day">
+                <div class="wd-icon">${weatherIcon(d.weatherCode)}</div>
+                <div class="wd-date">${new Date(d.date).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric' })}</div>
+                <div class="wd-temp">${Math.round(d.tempMax)}°<span class="wd-temp-low">${Math.round(d.tempMin)}°</span></div>
+                <div class="wd-label">${d.weatherLabel}</div>
+                ${d.precipitation > 0 ? `<div class="wd-rain">💧 ${d.precipitation.toFixed(1)}mm</div>` : ''}
+            </div>`
+        ).join('');
+        return `<div class="weather-card">
+            <div class="wc-header">
+                <div class="wc-city">${summaryIcon(s.overallLabel)} ${w.city}</div>
+                <div class="wc-summary">${s.overallLabel || ''}</div>
+            </div>
+            <div class="wc-stats">
+                <span>🌡️ ${s.avgTempMin}° – ${s.avgTempMax}°C</span>
+                <span>🌧️ ${s.rainyDays} rainy day${s.rainyDays === 1 ? '' : 's'}</span>
+                <span>☀️ ${s.sunnyDays} sunny day${s.sunnyDays === 1 ? '' : 's'}</span>
+            </div>
+            <div class="wc-daily">${dailyHtml}</div>
+        </div>`;
+    }).join('');
+}
+
+// ============================
+// Render Plan Detail (same as before)
+// ============================
 
 function renderDetail() {
     const curr = settings.currency === 'USD' ? 'USD' : 'kr';
@@ -288,7 +482,7 @@ function renderDetail() {
         html += `<div class="plan-section"><div class="plan-section-title">Overview</div><div class="plan-overview">${detailPlan.overview}</div></div>`;
     }
     if (detailPlan.dayByDay && detailPlan.dayByDay.length) {
-        html += `<div class="plan-section"><div class="plan-section-title">Day by Day</div>`;
+        html += '<div class="plan-section"><div class="plan-section-title">Day by Day</div>';
         html += detailPlan.dayByDay.map(d => {
             const colon = d.indexOf(':');
             const label = colon > 0 ? d.slice(0, colon) : '';
@@ -298,22 +492,22 @@ function renderDetail() {
         html += '</div>';
     }
     if (detailPlan.tips && detailPlan.tips.length) {
-        html += `<div class="plan-section"><div class="plan-section-title">Tips &amp; Tricks</div>`;
+        html += '<div class="plan-section"><div class="plan-section-title">Tips & Tricks</div>';
         html += detailPlan.tips.map(t => `<div class="tip-item">${t}</div>`).join('');
         html += '</div>';
     }
     if (bp.total) {
-        html += `<div class="plan-section"><div class="plan-section-title">Predicted Budget</div><div class="budget-breakdown">`;
-        ['flight','accommodation','food','activities','other'].filter(k => bp[k]).forEach(k => {
-            html += `<div class="bb-row"><span class="bb-label">${k.charAt(0).toUpperCase()+k.slice(1)}</span><span class="bb-val">${bp[k].toLocaleString()} ${curr}</span></div>`;
+        html += '<div class="plan-section"><div class="plan-section-title">Predicted Budget</div><div class="budget-breakdown">';
+        ['flight', 'accommodation', 'food', 'activities', 'other'].filter(k => bp[k]).forEach(k => {
+            html += `<div class="bb-row"><span class="bb-label">${k.charAt(0).toUpperCase() + k.slice(1)}</span><span class="bb-val">${bp[k].toLocaleString()} ${curr}</span></div>`;
         });
         html += `<div class="bb-row total"><span class="bb-label" style="font-weight:700">Total</span><span class="bb-val">${bp.total.toLocaleString()} ${curr}</span></div>`;
         html += '</div></div>';
     }
     if (nearby.length) {
-        html += `<div class="plan-section"><div class="plan-section-title">Nearby Options</div>`;
+        html += '<div class="plan-section"><div class="plan-section-title">Nearby Options</div>';
         html += nearby.map(n => `<div class="nearby-item">
-            <div class="nearby-flag">${n.flag || '🏳️'}</div>
+            <div class="nearby-flag">${n.flag || '\ud83c\udff3\ufe0f'}</div>
             <div class="nearby-info"><div class="nearby-name">${n.destination}, ${n.country}</div><div class="nearby-reason">${n.reason}</div></div>
             <span class="nearby-extra">+${n.extraDays} days</span>
         </div>`).join('');
@@ -322,13 +516,17 @@ function renderDetail() {
     document.getElementById('planDetail').innerHTML = html || '<p style="color:var(--text-secondary)">No plan data returned.</p>';
 }
 
+// ============================
+// Step 5: Confirm & Save
+// ============================
+
 function renderConfirm() {
-    if (!selectedDest) return;
     const curr = settings.currency === 'USD' ? 'USD' : 'kr';
     const bp = detailPlan && detailPlan.budgetBreakdown;
-    document.getElementById('confirmFlag').textContent = selectedDest.flag || '✈️';
-    document.getElementById('confirmTitle').textContent = selectedDest.city;
-    document.getElementById('confirmDest').textContent = selectedDest.country + ' \u2014 ' + travelStyle + ' trip';
+    const citiesLabel = selectedCities.join(', ');
+    document.getElementById('confirmFlag').textContent = selectedCountry?.flag || '✈️';
+    document.getElementById('confirmTitle').textContent = citiesLabel;
+    document.getElementById('confirmDest').textContent = (selectedCountry?.name || '') + ' \u2014 ' + travelStyle + ' trip';
     document.getElementById('confirmDays').textContent = days + ' days';
     document.getElementById('confirmBudget').textContent = bp ? (bp.total.toLocaleString() + ' ' + curr) : '\u2014';
     document.getElementById('confirmStyle').textContent = travelStyle.charAt(0).toUpperCase() + travelStyle.slice(1);
@@ -338,7 +536,7 @@ async function scheduleTrip() { await saveTrip('scheduled'); }
 async function startTrip() { await saveTrip('planned'); }
 
 async function saveTrip(status) {
-    if (!selectedDest) { toast('No destination selected', 'err'); return; }
+    if (!selectedCities.length) { toast('No cities selected', 'err'); return; }
     const curr = settings.currency || 'SEK';
     const bp = detailPlan && detailPlan.budgetBreakdown;
     const startDate = document.getElementById('startDate').value || '';
@@ -348,18 +546,19 @@ async function saveTrip(status) {
         d.setDate(d.getDate() + days - 1);
         endDate = d.toISOString().split('T')[0];
     }
+    const citiesLabel = selectedCities.join(', ');
     const trip = {
-        name: `${days}-Day ${selectedDest.city} ${travelStyle.charAt(0).toUpperCase() + travelStyle.slice(1)}`,
-        destination: selectedDest.city,
-        country: selectedDest.country,
-        countryCode: '',
-        flag: selectedDest.flag || '✈️',
+        name: `${days}-Day ${citiesLabel} ${travelStyle.charAt(0).toUpperCase() + travelStyle.slice(1)}`,
+        destination: citiesLabel,
+        country: selectedCountry?.name || '',
+        countryCode: selectedCountry?.code || '',
+        flag: selectedCountry?.flag || '✈️',
         startDate,
         endDate,
         durationDays: days,
         status,
         travelStyle,
-        notes: selectedDest.tagline || '',
+        notes: '',
         budget: {
             totalBudget: 0,
             predictedBudget: bp ? bp.total : budget,
@@ -372,7 +571,7 @@ async function saveTrip(status) {
             ].filter(e => e.amount > 0) : [],
         },
         transports: [],
-        places: (selectedDest.tips || []).slice(0, 5).map(tip => ({ name: tip, category: 'attraction', status: 'want' })),
+        places: (detailPlan?.tips || []).slice(0, 5).map(tip => ({ name: tip, category: 'attraction', status: 'want' })),
         aiPlan: detailPlan,
     };
     try {
@@ -383,8 +582,37 @@ async function saveTrip(status) {
         });
         if (!res.ok) throw new Error('Failed');
         toast('Trip saved! Redirecting...', 'ok');
-        setTimeout(() => location.href = '/trips.html', 1500);
+        setTimeout(() => { location.href = '/trips.html'; }, 1500);
     } catch { toast('Failed to save trip', 'err'); }
+}
+
+// ============================
+// Navigation
+// ============================
+
+function goStep(n) {
+    if (n === 2 && !selectedCountry) { toast('Please pick a country', 'err'); return; }
+    if (n === 2) loadCities();
+    if (n === 3 && !selectedCities.length) { toast('Please pick at least one city', 'err'); return; }
+    if (n === 5) renderConfirm();
+    currentStep = n;
+    document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
+    const panel = document.getElementById('step' + n);
+    if (panel) panel.classList.add('active');
+    // Update stepper dots
+    for (let i = 1; i <= 5; i++) {
+        const dot = document.getElementById('dot' + i);
+        if (!dot) continue;
+        dot.classList.remove('active', 'done');
+        if (i < n) dot.classList.add('done');
+        else if (i === n) dot.classList.add('active');
+    }
+    // Update stepper lines
+    for (let i = 1; i <= 4; i++) {
+        const line = document.getElementById('line' + i);
+        if (!line) continue;
+        line.classList.toggle('done', i < n);
+    }
 }
 
 function toast(msg, type) {

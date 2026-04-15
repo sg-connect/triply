@@ -2,6 +2,10 @@ import express from 'express';
 import path from 'path';
 import * as db from './services/db';
 import * as ollama from './services/ollama';
+import * as countries from './services/countries';
+import * as weather from './services/weather';
+import * as wiki from './services/wikipedia';
+import * as currency from './services/currency';
 import { Trip, PlanRequest } from './models';
 
 const app = express();
@@ -91,6 +95,88 @@ app.put('/api/settings', async (req, res) => {
     catch (err) { console.error('[settings-put]', err); res.status(500).json({ error: 'Failed to save settings' }); }
 });
 
+// --- Country & City data (REST Countries, no key) ---
+
+app.get('/api/countries', async (_req, res) => {
+    try {
+        const all = await countries.getAllCountries();
+        // Return a slim list for the dropdown (name, code, flag, capital, region)
+        res.json(all.map(c => ({ name: c.name, code: c.code, flag: c.flag, capital: c.capital, region: c.region, subregion: c.subregion })));
+    } catch (err) { console.error('[countries]', err); res.status(500).json({ error: 'Failed to load countries' }); }
+});
+
+app.get('/api/countries/:code', async (req, res) => {
+    try {
+        const info = await countries.getCountryByCode(req.params.code.toUpperCase());
+        if (!info) return res.status(404).json({ error: 'Country not found' });
+        res.json(info);
+    } catch (err) { console.error('[country]', err); res.status(500).json({ error: 'Failed to load country' }); }
+});
+
+app.get('/api/countries/:code/cities', async (req, res) => {
+    const cities = countries.getCitiesForCountry(req.params.code.toUpperCase());
+    res.json(cities);
+});
+
+// --- City enrichment (Wikipedia + Wikivoyage + Weather + Currency, all free) ---
+
+app.get('/api/city/enrich', async (req, res) => {
+    try {
+        const { city, country, countryCode, startDate, days, homeCurrency } = req.query;
+        if (!city) return res.status(400).json({ error: 'city is required' });
+
+        const cityStr = city as string;
+        const countryStr = (country as string) || '';
+        const start = (startDate as string) || new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0];
+        const numDays = Number.parseInt((days as string) || '7', 10);
+
+        // Fetch country info (for currency)
+        let countryInfo = null;
+        if (countryCode) {
+            countryInfo = await countries.getCountryByCode((countryCode as string).toUpperCase());
+        }
+
+        // Run all data fetches in parallel
+        const [summary, guide, weatherData, currencyRate] = await Promise.all([
+            wiki.getCitySummary(cityStr, countryStr).catch(() => null),
+            wiki.getWikivoyageGuide(cityStr).catch(() => null),
+            weather.getCityWeather(cityStr, countryStr, start, numDays).catch(() => null),
+            (homeCurrency && countryInfo?.currencies?.[0])
+                ? currency.getRate(homeCurrency as string, countryInfo.currencies[0]).catch(() => null)
+                : Promise.resolve(null),
+        ]);
+
+        res.json({
+            city: cityStr,
+            country: countryStr,
+            summary,
+            guide,
+            weather: weatherData,
+            currency: currencyRate,
+            countryInfo,
+        });
+    } catch (err) { console.error('[city-enrich]', err); res.status(500).json({ error: 'City enrichment failed' }); }
+});
+
+// --- Weather (Open-Meteo, no key) ---
+
+app.get('/api/weather', async (req, res) => {
+    try {
+        const { city, country, startDate, days } = req.query;
+        if (!city || !startDate || !days) return res.status(400).json({ error: 'city, startDate, and days are required' });
+        const result = await weather.getCityWeather(
+            city as string,
+            (country as string) || '',
+            startDate as string,
+            Number.parseInt(days as string, 10) || 7,
+        );
+        if (!result) return res.status(404).json({ error: 'Could not find weather for this city' });
+        res.json(result);
+    } catch (err) { console.error('[weather]', err); res.status(500).json({ error: 'Weather fetch failed' }); }
+});
+
+// --- Plan with real data (country + cities + weather → AI) ---
+
 app.post('/api/plan/suggest', async (req, res) => {
     try {
         const planReq = req.body as PlanRequest;
@@ -104,41 +190,14 @@ app.post('/api/plan/suggest', async (req, res) => {
 
 app.post('/api/plan/detail', async (req, res) => {
     try {
-        const { destination, country, days, style, currency } = req.body;
+        const { destination, country: countryName, days, style, currency: planCurrency, weatherData, countryInfo, cityProfiles } = req.body;
         if (!destination || !days) return res.status(400).json({ error: 'destination and days required' });
-        const plan = await ollama.generateTripPlan(destination, country || '', days, style || 'mixed', currency || 'SEK');
+        const plan = await ollama.generateTripPlan(
+            destination, countryName || '', days, style || 'mixed', planCurrency || 'SEK',
+            weatherData || null, countryInfo || null, cityProfiles || null,
+        );
         res.json(plan);
     } catch (err) { console.error('[plan-detail]', err); res.status(500).json({ error: 'Failed to generate plan' }); }
-});
-
-app.post('/api/plan/from-prompt', async (req, res) => {
-    try {
-        const { prompt, currency } = req.body;
-        if (!prompt || typeof prompt !== 'string' || !prompt.trim()) {
-            return res.status(400).json({ error: 'prompt is required' });
-        }
-        let webContext = '';
-        try {
-            const q = encodeURIComponent(`best travel destinations ${prompt.slice(0, 100)}`);
-            const ddgRes = await fetch(`https://api.duckduckgo.com/?q=${q}&format=json&no_html=1&skip_disambig=1`, {
-                headers: { 'User-Agent': 'Triply/1.0' },
-                signal: AbortSignal.timeout(5000),
-            });
-            const ddgData = await ddgRes.json() as any;
-            const parts: string[] = [];
-            if (ddgData.AbstractText) parts.push(ddgData.AbstractText);
-            if (Array.isArray(ddgData.RelatedTopics)) {
-                for (const t of (ddgData.RelatedTopics as any[]).slice(0, 4)) {
-                    if (t.Text) parts.push(t.Text);
-                }
-            }
-            webContext = parts.join('\n');
-        } catch {
-            console.warn('[from-prompt] web search skipped');
-        }
-        const suggestions = await ollama.suggestFromFreePrompt(prompt.trim(), currency || 'SEK', webContext || undefined);
-        res.json(suggestions);
-    } catch (err) { console.error('[from-prompt]', err); res.status(500).json({ error: 'Failed to get suggestions from prompt' }); }
 });
 
 app.post('/api/wipe', async (_req, res) => {

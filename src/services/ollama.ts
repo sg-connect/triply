@@ -82,10 +82,58 @@ Budget amounts must be in ${curr}. Return only the JSON array, no other text.`;
     return parseJson<DestinationSuggestion[]>(raw, []);
 }
 
-export async function generateTripPlan(destination: string, country: string, days: number, style: string, currency: string): Promise<AiPlan> {
+export async function generateTripPlan(
+    destination: string, country: string, days: number, style: string, currency: string,
+    weatherData?: any, countryInfo?: any, cityProfiles?: any[],
+): Promise<AiPlan> {
     const curr = currency === 'USD' ? 'USD' : 'SEK';
-    const prompt = `Create a detailed ${days}-day ${style} travel plan for ${destination}, ${country}.
 
+    let weatherSection = '';
+    if (weatherData?.summary) {
+        const s = weatherData.summary;
+        weatherSection = `
+═══ REAL WEATHER FORECAST (from Open-Meteo) ═══
+Conditions: ${s.overallLabel}
+Average highs: ${s.avgTempMax}°C | Average lows: ${s.avgTempMin}°C
+Total rain: ${s.totalRainMm}mm over the period
+Rainy days: ${s.rainyDays} | Sunny days: ${s.sunnyDays}
+${weatherData.daily ? 'Daily breakdown:\n' + weatherData.daily.slice(0, 7).map((d: any) => `  ${d.date}: ${d.tempMin}–${d.tempMax}°C, ${d.weatherLabel}, ${d.precipitation}mm rain`).join('\n') : ''}
+
+Use this real weather data to plan activities appropriately. Suggest indoor alternatives for rainy days. Pack recommendations should match the actual forecast.
+`;
+    }
+
+    let countrySection = '';
+    if (countryInfo) {
+        countrySection = `
+═══ COUNTRY INFO (from REST Countries) ═══
+Capital: ${countryInfo.capital || 'N/A'}
+Currency: ${(countryInfo.currencies || []).join(', ') || 'N/A'}
+Languages: ${(countryInfo.languages || []).join(', ') || 'N/A'}
+Region: ${countryInfo.region || ''} / ${countryInfo.subregion || ''}
+Population: ${countryInfo.population ? (countryInfo.population / 1e6).toFixed(1) + 'M' : 'N/A'}
+
+Include practical tips about the local currency and language. Mention if tipping is customary.
+`;
+    }
+
+    let cityProfilesSection = '';
+    if (cityProfiles?.length) {
+        cityProfilesSection = '\n═══ CITY DETAILS (from Wikipedia + Wikivoyage) ═══\n';
+        for (const p of cityProfiles) {
+            if (!p) continue;
+            cityProfilesSection += `\n--- ${p.city} ---\n`;
+            if (p.summary?.extract) cityProfilesSection += `About: ${p.summary.extract.slice(0, 400)}\n`;
+            if (p.guide?.see?.length) cityProfilesSection += `Top sights: ${p.guide.see.slice(0, 6).join(' • ')}\n`;
+            if (p.guide?.doActivities?.length) cityProfilesSection += `Things to do: ${p.guide.doActivities.slice(0, 5).join(' • ')}\n`;
+            if (p.guide?.eat?.length) cityProfilesSection += `Where to eat: ${p.guide.eat.slice(0, 4).join(' • ')}\n`;
+            if (p.currency?.rate) cityProfilesSection += `Exchange rate: 1 ${p.currency.base} = ${p.currency.rate.toFixed(4)} ${p.currency.target}\n`;
+        }
+        cityProfilesSection += '\nUse these REAL attractions and restaurants in your day-by-day plan. Reference them by name.\n';
+    }
+
+    const prompt = `Create a detailed ${days}-day ${style} travel plan for ${destination}, ${country}.
+${weatherSection}${countrySection}${cityProfilesSection}
 Return ONLY a JSON object:
 {
   "overview": "Brief 2-sentence description of this trip",
